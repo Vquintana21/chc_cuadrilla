@@ -20,10 +20,6 @@ $sqlPeriodo = "SELECT inicio, fin, fin_revision FROM chc_periodosys WHERE activo
 $resultPeriodo = mysqli_query($conn, $sqlPeriodo);
 $periodoActivo = mysqli_fetch_assoc($resultPeriodo);
 
-$fecha_inicio = new DateTime($periodoActivo['inicio']);
-$fecha_fin = new DateTime($periodoActivo['fin']);
-$fecha_fin_revision = new DateTime($periodoActivo['fin_revision']);
-
 $fechaActual = date('Y-m-d H:i:s');
 $puedeEditar = false;
 $enRevision = false;
@@ -37,6 +33,7 @@ if($periodoActivo) {
 }
 
 // Consultar solicitudes CHC del curso
+// ✅ Se agrega idestadocuadrilla y se hace LEFT JOIN con chc_p_cuadrilla para saber si ya tiene cuadrilla iniciada
 $sqlSolicitudes = "
     SELECT 
         s.idsolicitud,
@@ -44,19 +41,27 @@ $sqlSolicitudes = "
         s.codigocurso,
         s.seccion,
         s.fecha_registro,
+        s.idestadoagenda,
+        s.idestadocuadrilla,
+        s.comentario_agenda,
+        s.uso_debriefing,
         m.modalidad,
-		s.idestadoagenda,
-		s.comentario_agenda,
+        sm.idmodalidad,
         COUNT(DISTINCT sa.idplanclases) as total_actividades,
         CONCAT(DATE_FORMAT(MIN(p.pcl_Fecha), '%d/%m/%Y'), ' - ', DATE_FORMAT(MAX(p.pcl_Fecha), '%d/%m/%Y')) as rango_fechas,
-		(SELECT COUNT(*) FROM chc_cuadrilla_doc cd WHERE cd.idsolicitud = s.idsolicitud AND cd.activo = 1) as total_cuadrillas
+        cq.idcuadrilla,
+        cq.estado as estado_cuadrilla
     FROM chc_solicitud s
     LEFT JOIN chc_solicitud_modalidad sm ON s.idsolicitud = sm.idsolicitud
     LEFT JOIN chc_modalidad m ON sm.idmodalidad = m.idmodalidad
     LEFT JOIN chc_solicitud_actividad sa ON s.idsolicitud = sa.idsolicitud
-    LEFT JOIN planclases p ON sa.idplanclases = p.idplanclases
+    LEFT JOIN planclases_test p ON sa.idplanclases = p.idplanclases
+    LEFT JOIN chc_p_cuadrilla cq ON s.idsolicitud = cq.idsolicitud
     WHERE s.idcurso = ?
-    GROUP BY s.idsolicitud, s.nombrecurso, s.codigocurso, s.seccion, s.fecha_registro, m.modalidad
+    GROUP BY s.idsolicitud, s.nombrecurso, s.codigocurso, s.seccion, 
+             s.fecha_registro, m.modalidad, sm.idmodalidad,
+             s.idestadoagenda, s.idestadocuadrilla, s.comentario_agenda,
+             s.uso_debriefing, cq.idcuadrilla, cq.estado
     ORDER BY s.fecha_registro DESC
 ";
 
@@ -77,7 +82,7 @@ mysqli_stmt_close($stmtSolicitudes);
     .chc-card {
         border: 1px solid #dee2e6;
         border-radius: 8px;
-        padding: 1rem;
+        padding: 1.5rem;
         margin-bottom: 1rem;
         transition: all 0.3s ease;
         background: white;
@@ -87,17 +92,17 @@ mysqli_stmt_close($stmtSolicitudes);
         border-color: #0d6efd;
     }
     .chc-header {
-         background: #666666;
+        background: #0d6efd;
         color: white;
-        padding: 1rem;
+        padding: 2rem;
         border-radius: 8px;
         margin-bottom: 2rem;
     }
     .btn-agendar-nueva {
-        background: #0d6efd;
+        background: #FFC107;
         border: none;
         padding: 1rem 2rem;
-        font-size: 1rem;
+        font-size: 1.1rem;
         font-weight: 600;
         transition: transform 0.2s;
     }
@@ -120,43 +125,73 @@ mysqli_stmt_close($stmtSolicitudes);
         font-size: 4rem;
         color: #adb5bd;
         margin-bottom: 1rem;
-    }	
+    }
 
-.swal-wide {
-    font-size: 0.9rem !important;
-}
+    .swal-wide {
+        font-size: 0.9rem !important;
+    }
 
-.actividad-item {
-    background: #f8f9fa;
-    transition: all 0.2s;
-}
+    .actividad-item {
+        background: #f8f9fa;
+        transition: all 0.2s;
+    }
 
-.actividad-item:hover {
-    background: #e9ecef;
-    transform: translateX(5px);
-}
+    .actividad-item:hover {
+        background: #e9ecef;
+        transform: translateX(5px);
+    }
 
-#formEditarCHC .form-label {
-    margin-bottom: 0.3rem;
-}
+    #formEditarCHC .form-label {
+        margin-bottom: 0.3rem;
+    }
 
-#formEditarCHC .form-check {
-    margin-bottom: 0.5rem;
-}
+    #formEditarCHC .form-check {
+        margin-bottom: 0.5rem;
+    }
 
-#formEditarCHC .alert {
-    font-size: 0.9rem;
-}
+    #formEditarCHC .alert {
+        font-size: 0.9rem;
+    }
 
-.swal2-html-container {
-    max-height: 60vh;
-    overflow-y: auto;
-}
+    .swal2-html-container {
+        max-height: 60vh;
+        overflow-y: auto;
+    }
 
-.chc-card.border-danger {
-    background: #f8d7da !important;
-}
+    .chc-card.border-danger {
+        background: #f8d7da !important;
+    }
 
+    /* ✅ Estilos para el badge de cuadrilla */
+    .badge-cuadrilla-creacion  { background-color: #fd7e14; }
+    .badge-cuadrilla-verificacion { background-color: #6f42c1; }
+    .badge-cuadrilla-enviada   { background-color: #198754; }
+
+    /* ✅ Botón completar cuadrilla */
+    .btn-cuadrilla {
+        background-color: #198754;
+        color: white;
+        border: none;
+        font-weight: 600;
+        transition: all 0.2s;
+    }
+    .btn-cuadrilla:hover {
+        background-color: #146c43;
+        color: white;
+        transform: translateY(-1px);
+    }
+    .btn-cuadrilla-continuar {
+        background-color: #6f42c1;
+        color: white;
+        border: none;
+        font-weight: 600;
+        transition: all 0.2s;
+    }
+    .btn-cuadrilla-continuar:hover {
+        background-color: #59359a;
+        color: white;
+        transform: translateY(-1px);
+    }
 </style>
 
 <div class="container-fluid mt-4">
@@ -165,123 +200,35 @@ mysqli_stmt_close($stmtSolicitudes);
     <div class="chc-header">
         <div class="row align-items-center">
             <div class="col-md-8">
-                <h4 class="mb-2">
+                <h2 class="mb-2">
                     <i class="bi bi-hospital"></i> 
                     Centro de Habilidades Clínicas (CHC)
-                </h4>
+                </h2>
                 <p class="mb-0 opacity-75">
                     Gestión de solicitudes de actividades clínicas
                 </p>
             </div>
-           <div class="col-md-4 text-end">
-				<button class="btn btn-light btn-lg btn-agendar-nueva" onclick="iniciarAgendamientoCHC()">
-					<i class="bi bi-plus-circle me-2"></i>
-					Agendar Nueva Actividad
-				</button>
-			</div>
-			  <!--
-			<div class="col-md-4 text-end">
-			<?php //if($puedeEditar): ?>
-				<button class="btn btn-primary btn-lg btn-agendar-nueva" onclick="iniciarAgendamientoCHC()">
-					<i class="bi bi-plus-circle me-2"></i>
-					Agendar Nueva Actividad
-				</button>
-			<?php //elseif($enRevision): ?>
-				<button class="btn btn-warning btn-lg" disabled style="background-color: #FFC107 !important;">
-					<i class="bi bi-lock me-2"></i>
-					Período en Revisión
-				</button>
-			<?php //else: ?>
-				<button class="btn btn-warning btn-lg" disabled style="background-color: #DC3741 !important;">
-					<i class="bi bi-calendar-x me-2"></i>
-					Fuera de Período
-				</button>
-			<?php //endif; ?>
-		</div>  -->
-        </div>
-    </div>
-	
-<div class="accordion mb-4" id="accordionInstrucciones">
-    <div class="accordion-item border-warning">
-        <h2 class="accordion-header">
-            <button class="accordion-button bg-warning bg-opacity-10 text-warning fw-bold d-flex justify-content-between align-items-center"
-                    type="button"
-                    data-bs-toggle="collapse"
-                    data-bs-target="#collapseInstrucciones"
-                    aria-expanded="true"
-                    aria-controls="collapseInstrucciones">
-                <span>
-                    <i class="bi bi-exclamation-triangle-fill me-2"></i>
-                    Instrucciones Importantes para Agenda CHC
-                </span>
-                <span class="badge bg-info ms-3">Pinche aquí</span>
-            </button>
-        </h2>
-
-        <div id="collapseInstrucciones"
-             class="accordion-collapse collapse show"
-             data-bs-parent="#accordionInstrucciones">
-            <div class="accordion-body">
-                <ul class="list-group list-group-flush">
-				  <li class="list-group-item">                       
-                        <a class="nav-link" href="https://dpi.med.uchile.cl/calendario/capacitaciones.php" target="blank" >   <i class="fas fa-video"></i> Ver capacitación CHC </a>
-                   </li>
-                    <li class="list-group-item">
-                        <i class="bi bi-clipboard-check text-primary me-2"></i>
-                        Fechas en que podrá pedir, editar, agregar y eliminar agenda será desde
-                        <b><?= $fecha_inicio->format('d/m/Y H:i'); ?></b> hasta
-                        <b><?= $fecha_fin->format('d/m/Y H:i'); ?></b>
-                    </li>
-                    <li class="list-group-item">
-                        <i class="bi bi-pencil-square text-success me-2"></i>
-                        Fechas de revisión en que NO podrá editar y eliminar agendas ya en revisión,
-                        será desde <b><?= $fecha_fin->format('d/m/Y H:i'); ?></b> hasta
-                        <b><?= $fecha_fin_revision->format('d/m/Y H:i'); ?></b>
-                    </li>
-                    <li class="list-group-item">
-                        <i class="bi bi-pencil text-success me-2"></i>
-                        En las fechas de revisión podrá enviar más solicitudes nuevas,
-                        pero serán gestionadas en plazos diferidos y marcadas como
-                        <b>fuera de plazo</b>.
-                    </li>
-                </ul>
+            <div class="col-md-4 text-end">
+                <button class="btn btn-light btn-lg btn-agendar-nueva" onclick="iniciarAgendamientoCHC()">
+                    <i class="bi bi-plus-circle me-2"></i>
+                    Agendar Nueva Actividad
+                </button>
             </div>
         </div>
     </div>
-</div>
-
-	
-	
 
     <?php if(empty($solicitudes)): ?>
         <!-- Estado vacío -->
         <div class="empty-state">
-            <i class="bi bi-calendar-x me-2 fs-4"></i>
-            <h5>No hay solicitudes CHC registradas</h5>
+            <i class="bi bi-calendar-x"></i>
+            <h4>No hay solicitudes CHC registradas</h4>
             <p class="text-muted mb-4">
                 Comience creando su primera solicitud de actividades para el Centro de Habilidades Clínicas
             </p>
-            <!-- <button class="btn btn-primary" onclick="iniciarAgendamientoCHC()">
+            <button class="btn btn-primary btn-lg" onclick="iniciarAgendamientoCHC()">
+                <i class="bi bi-plus-circle me-2"></i>
                 Crear Primera Solicitud
-            </button> -->
-			
-			<button class="btn btn-primary btn-lg" onclick="iniciarAgendamientoCHC()">
-					<i class="bi bi-plus-circle me-2 fs-5"></i>
-					Crear Primera Solicitud
-			</button>
-			<!-- 
-			<?php // if($puedeEditar): ?>
-				<button class="btn btn-primary btn-lg" onclick="iniciarAgendamientoCHC()">
-					<i class="bi bi-plus-circle me-2 fs-5"></i>
-					Crear Primera Solicitud
-				</button>
-			<?php // else: ?>
-				<button class="btn btn-secondary btn-lg" disabled>
-					<i class="bi bi-lock me-2"></i>
-					<?php // echo $enRevision ? 'Período en Revisión' : 'Fuera de Período'; ?>
-				</button>
-			<?php // endif; ?>
-			-->
+            </button>
         </div>
         
     <?php else: ?>
@@ -300,8 +247,9 @@ mysqli_stmt_close($stmtSolicitudes);
         <div class="row">
             <?php foreach($solicitudes as $solicitud): ?>
             <div class="col-md-6 col-lg-4">
-				<div class="chc-card bg-light <?php echo ($solicitud['idestadoagenda'] == 3) ? 'opacity-75 border-danger' : ''; ?>">
-                    <!-- Badge de modalidad -->
+                <div class="chc-card bg-light <?php echo ($solicitud['idestadoagenda'] == 3) ? 'opacity-75 border-danger' : ''; ?>">
+                    
+                    <!-- Badges: modalidad + fecha + estado agenda -->
                     <div class="d-flex justify-content-between align-items-start mb-3">
                         <span class="badge bg-success badge-modalidad">
                             <?php echo $solicitud['modalidad']; ?> 
@@ -310,22 +258,38 @@ mysqli_stmt_close($stmtSolicitudes);
                             <i class="bi bi-calendar-event"></i>
                             <?php echo date('d/m/Y', strtotime($solicitud['fecha_registro'])); ?>
                         </span>
-						 <span class="badge <?php 
-								if($solicitud['idestadoagenda'] == 1) echo 'bg-primary';
-								elseif($solicitud['idestadoagenda'] == 2) echo 'bg-success';
-								elseif($solicitud['idestadoagenda'] == 3) echo 'bg-danger';
-							?>">
-								<?php 
-									if($solicitud['idestadoagenda'] == 1) {
-										echo '<i class="bi bi-clock-history"></i> Enviado';
-									} elseif($solicitud['idestadoagenda'] == 2) {
-										echo '<i class="bi bi-check-circle-fill"></i> Confirmado';
-									} elseif($solicitud['idestadoagenda'] == 3) {
-										echo '<i class="bi bi-x-circle-fill"></i> Cancelado';
-									}
-								?>
-							</span>
+                        <span class="badge <?php 
+                            if($solicitud['idestadoagenda'] == 1) echo 'bg-primary';
+                            elseif($solicitud['idestadoagenda'] == 2) echo 'bg-success';
+                            elseif($solicitud['idestadoagenda'] == 3) echo 'bg-danger';
+                        ?>">
+                            <?php 
+                                if($solicitud['idestadoagenda'] == 1) {
+                                    echo '<i class="bi bi-clock-history"></i> Enviado';
+                                } elseif($solicitud['idestadoagenda'] == 2) {
+                                    echo '<i class="bi bi-check-circle-fill"></i> Confirmado';
+                                } elseif($solicitud['idestadoagenda'] == 3) {
+                                    echo '<i class="bi bi-x-circle-fill"></i> Cancelado';
+                                }
+                            ?>
+                        </span>
                     </div>
+
+                    <!-- ✅ Badge estado cuadrilla (solo si agenda está confirmada) -->
+                    <?php if($solicitud['idestadoagenda'] == 2 && !empty($solicitud['idcuadrilla'])): ?>
+                    <div class="mb-2">
+                        <?php
+                            $estadoCuad = $solicitud['estado_cuadrilla'];
+                            if($estadoCuad == 1) {
+                                echo '<span class="badge badge-cuadrilla-creacion"><i class="bi bi-pencil-fill me-1"></i>Cuadrilla en creación</span>';
+                            } elseif($estadoCuad == 2) {
+                                echo '<span class="badge badge-cuadrilla-verificacion"><i class="bi bi-eye-fill me-1"></i>Cuadrilla en verificación</span>';
+                            } elseif($estadoCuad == 3) {
+                                echo '<span class="badge badge-cuadrilla-enviada"><i class="bi bi-send-fill me-1"></i>Cuadrilla enviada</span>';
+                            }
+                        ?>
+                    </div>
+                    <?php endif; ?>
 
                     <!-- Información de la solicitud -->
                     <h6 class="mb-2">
@@ -347,125 +311,142 @@ mysqli_stmt_close($stmtSolicitudes);
                         </small>
                     </div>
 
-                    
                     <!-- Acciones -->
-					<div class="d-grid gap-2">
-						<?php if($solicitud['idestadoagenda'] == 3): ?>
-							<!-- Estado Cancelado - Solo ver motivo, NO eliminar (queda para estadísticas) -->
-							<?php if(!empty($solicitud['comentario_agenda'])): ?>
-							<?php 
-								$comentario_escapado = htmlspecialchars($solicitud['comentario_agenda'], ENT_QUOTES, 'UTF-8');
-							?>
-								<button class="btn btn-info btn-sm btn-ver-cancelacion" 
-									data-idsolicitud="<?php echo $solicitud['idsolicitud']; ?>" 
-									data-comentario="<?php echo $comentario_escapado; ?>">
-									<i class="bi bi-chat-left-text"></i> Ver Motivo de Cancelación
-								</button>
-							<?php endif; ?>
-							<span class="badge bg-secondary py-2">
-								<i class="bi bi-archive"></i> Archivado para estadísticas
-							</span>
-						<?php else: ?>
-							<!-- Estados Enviado o Confirmado -->
-							<button class="btn btn-primary btn-sm" 
-									onclick="verDetalleSolicitudCHC(<?php echo $solicitud['idsolicitud']; ?>)">
-								<i class="bi bi-eye"></i> Ver Detalle
-							</button>
-							
-							<?php if($solicitud['idestadoagenda'] == 1): ?>
-								<!-- Estado Enviado -->
-								<?php if(!$enRevision): ?>
-									<!-- Período de edición - puede editar y eliminar -->
-									<div class="btn-group" role="group">
-										<button class="btn btn-info btn-sm" 
-												onclick="editarSolicitudCHC(<?php echo $solicitud['idsolicitud']; ?>)">
-											<i class="bi bi-pencil"></i> Editar
-										</button>
-										<button class="btn btn-warning btn-sm" 
-												onclick="eliminarSolicitudCHC(<?php echo $solicitud['idsolicitud']; ?>)">
-											<i class="bi bi-trash"></i> Eliminar
-										</button>
-									</div>
-								<?php else: ?>
-									<!-- Fuera de período de edición - mostrar si fue enviada dentro o fuera de plazo -->
-									<?php 
-										$enviadaDentroPlazo = ($solicitud['fecha_registro'] <= $periodoActivo['fin']);
-									?>
-									<?php if($enviadaDentroPlazo): ?>
-										<span class="badge bg-info py-2">
-											<i class="bi bi-clock-history"></i> En Revisión - Dentro del Plazo
-										</span>
-									<?php else: ?>
-										<span class="badge bg-warning text-dark py-2">
-											<i class="bi bi-exclamation-triangle"></i> En Revisión - Fuera de Plazo
-										</span>
-									<?php endif; ?>
-								<?php endif; ?>
-							<?php else: ?>
-							<!-- Estado Confirmado (2) - Puede subir cuadrilla -->							
-								<?php if($solicitud['total_cuadrillas'] > 0): ?>
-									<div class="btn-group" role="group">
-										<button class="btn btn-outline-success btn-sm" 
-												onclick="subirCuadrillaCHC(<?php echo $solicitud['idsolicitud']; ?>)">
-											<i class="bi bi-file-earmark-pdf-fill"></i> Ver Cuadrilla
-											<span class="badge bg-success"><?php echo $solicitud['total_cuadrillas']; ?></span>
-										</button>
-										<button class="btn btn-success btn-sm" 
-												onclick="subirNuevaCuadrillaCHC(<?php echo $solicitud['idsolicitud']; ?>)">
-											<i class="bi bi-upload"></i> Subir Nueva Cuadrilla
-										</button>
-									</div>
-								<?php else: ?>
-								<div class="btn-group" role="group">
-									<button class="btn btn-success btn-sm" 
-											onclick="subirCuadrillaCHC(<?php echo $solicitud['idsolicitud']; ?>)">
-										<i class="bi bi-file-earmark-pdf"></i> Subir Cuadrilla
-									</button>
-										<a href="uploads/descargar_cuadrilla.php"
-										   class="btn btn-info btn-sm" download>
-											<i class="bi bi-download"></i> Bajar Formato Cuadrilla
-										</a>
-									</div>
-								<?php endif; ?>
-							<?php endif; ?>
-						<?php endif; ?>
-					</div>
+                    <div class="d-grid gap-2">
+                        <?php if($solicitud['idestadoagenda'] == 3): ?>
+                            <!-- Cancelado: ver motivo + eliminar -->
+                            <?php if(!empty($solicitud['comentario_agenda'])): ?>
+                            <?php $comentario_escapado = htmlspecialchars($solicitud['comentario_agenda'], ENT_QUOTES, 'UTF-8'); ?>
+                                <button class="btn btn-info btn-sm btn-ver-cancelacion" 
+                                    data-idsolicitud="<?php echo $solicitud['idsolicitud']; ?>" 
+                                    data-comentario="<?php echo $comentario_escapado; ?>">
+                                    <i class="bi bi-chat-left-text"></i> Ver Motivo de Cancelación
+                                </button>
+                            <?php endif; ?>
+                            <button class="btn btn-danger btn-sm" 
+                                    onclick="eliminarSolicitudCHC(<?php echo $solicitud['idsolicitud']; ?>)">
+                                <i class="bi bi-trash"></i> Eliminar Solicitud Cancelada
+                            </button>
+
+                        <?php elseif($solicitud['idestadoagenda'] == 2): ?>
+                            <!-- ✅ CONFIRMADO: Ver detalle + botón cuadrilla -->
+                            <button class="btn btn-primary btn-sm" 
+                                    onclick="verDetalleSolicitudCHC(<?php echo $solicitud['idsolicitud']; ?>)">
+                                <i class="bi bi-eye"></i> Ver Detalle
+                            </button>
+
+                            <?php
+                                // Determinar qué botón de cuadrilla mostrar
+                                $idcuad = $solicitud['idcuadrilla'];
+                                $estadoCuad = $solicitud['estado_cuadrilla'];
+
+                                if(empty($idcuad)) {
+                                    // No tiene cuadrilla aún → Crear
+                                    echo '<button class="btn btn-cuadrilla btn-sm" 
+                                            onclick="irACuadrilla(' . $solicitud['idsolicitud'] . ', 0)">
+                                            <i class="bi bi-clipboard-plus me-1"></i> Completar Cuadrilla
+                                          </button>';
+                                } elseif($estadoCuad == 1) {
+                                    // En creación → Continuar
+                                    echo '<button class="btn btn-cuadrilla-continuar btn-sm" 
+                                            onclick="irACuadrilla(' . $solicitud['idsolicitud'] . ', ' . $idcuad . ')">
+                                            <i class="bi bi-pencil-fill me-1"></i> Continuar Cuadrilla
+                                          </button>';
+                                } elseif($estadoCuad == 2) {
+                                    // En verificación → Ver/Verificar
+                                    echo '<button class="btn btn-cuadrilla-continuar btn-sm" 
+                                            onclick="irAVerificarCuadrilla(' . $idcuad . ')">
+                                            <i class="bi bi-eye-fill me-1"></i> Verificar Cuadrilla
+                                          </button>';
+                                } elseif($estadoCuad == 3) {
+                                    // Enviada → Solo ver
+                                    echo '<button class="btn btn-secondary btn-sm" 
+                                            onclick="irAVerificarCuadrilla(' . $idcuad . ')">
+                                            <i class="bi bi-send-check-fill me-1"></i> Ver Cuadrilla Enviada
+                                          </button>';
+                                }
+                            ?>
+
+                        <?php else: ?>
+                            <!-- ENVIADO (estado 1): opciones normales -->
+                            <button class="btn btn-primary btn-sm" 
+                                    onclick="verDetalleSolicitudCHC(<?php echo $solicitud['idsolicitud']; ?>)">
+                                <i class="bi bi-eye"></i> Ver Detalle
+                            </button>
+                            <div class="btn-group" role="group">
+                                <?php if($solicitud['idestadoagenda'] == 1 && $puedeEditar): ?>
+                                    <button class="btn btn-info btn-sm" 
+                                            onclick="editarSolicitudCHC(<?php echo $solicitud['idsolicitud']; ?>)">
+                                        <i class="bi bi-pencil"></i> Editar
+                                    </button>
+                                <?php elseif($solicitud['idestadoagenda'] == 1 && $enRevision): ?>
+                                    <button class="btn btn-secondary btn-sm">
+                                        <i class="bi bi-lock"></i> En Revisión
+                                    </button>
+                                <?php endif; ?>
+                                <button class="btn btn-warning btn-sm" 
+                                        onclick="eliminarSolicitudCHC(<?php echo $solicitud['idsolicitud']; ?>)">
+                                    <i class="bi bi-trash"></i> Eliminar
+                                </button>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+
                 </div>
             </div>
             <?php endforeach; ?>
         </div>
     <?php endif; ?>
-	
-	<!-- Modal para ver comentario de cancelación -->
-<div class="modal fade" id="modalComentarioCancelacion" tabindex="-1" aria-labelledby="modalComentarioCancelacionLabel" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content">
-            <div class="modal-header bg-danger text-white">
-                <h5 class="modal-title" id="modalComentarioCancelacionLabel">
-                    <i class="bi bi-x-circle-fill"></i> Motivo de Cancelación
-                </h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            <div class="modal-body">
-                <div class="alert alert-warning" role="alert">
-                    <i class="bi bi-info-circle"></i> <strong>Solicitud #<span id="idSolicitudCancelada"></span></strong>
+
+    <!-- Modal para ver comentario de cancelación -->
+    <div class="modal fade" id="modalComentarioCancelacion" tabindex="-1" aria-labelledby="modalComentarioCancelacionLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title" id="modalComentarioCancelacionLabel">
+                        <i class="bi bi-x-circle-fill"></i> Motivo de Cancelación
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
-                <div class="card">
-                    <div class="card-body">
-                        <h6 class="card-subtitle mb-2 text-muted">Comentario:</h6>
-                        <p class="card-text" id="textComentarioCancelacion"></p>
+                <div class="modal-body">
+                    <div class="alert alert-warning" role="alert">
+                        <i class="bi bi-info-circle"></i> <strong>Solicitud #<span id="idSolicitudCancelada"></span></strong>
+                    </div>
+                    <div class="card">
+                        <div class="card-body">
+                            <h6 class="card-subtitle mb-2 text-muted">Comentario:</h6>
+                            <p class="card-text" id="textComentarioCancelacion"></p>
+                        </div>
                     </div>
                 </div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
-                    <i class="bi bi-x-lg"></i> Cerrar
-                </button>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        <i class="bi bi-x-lg"></i> Cerrar
+                    </button>
+                </div>
             </div>
         </div>
     </div>
-</div>
 
 </div>
 
+<script>
+// ✅ Navegar al formulario de cuadrilla
+// idsolicitud: ID de la solicitud
+// idcuadrilla: 0 = nueva, >0 = continuar existente
+function irACuadrilla(idsolicitud, idcuadrilla) {
+    // Aquí se carga el módulo de cuadrilla dentro del sistema
+    // Ajustar según cómo carga tu sistema los módulos (iframe, include, etc.)
+    var url = 'chc_p_cuadrilla_crear.php?solicitud=' + idsolicitud;
+    if(idcuadrilla > 0) {
+        url += '&cuadrilla=' + idcuadrilla;
+    }
+    // Si el sistema carga con parámetro tab o similar, ajustar aquí
+    window.location.href = url;
+}
 
+// ✅ Navegar a la verificación de cuadrilla
+function irAVerificarCuadrilla(idcuadrilla) {
+    window.location.href = 'chc_p_cuadrilla_verificar.php?cuadrilla=' + idcuadrilla;
+}
+</script>
