@@ -430,23 +430,6 @@ mysqli_stmt_close($stmtSolicitudes);
 
 </div>
 
-<script>
-// ✅ Navegar al formulario de cuadrilla
-// idsolicitud: ID de la solicitud
-// idcuadrilla: 0 = nueva, >0 = continuar existente
-function irACuadrilla(idsolicitud, idcuadrilla) {
-    // Aquí se carga el módulo de cuadrilla dentro del sistema
-    // Ajustar según cómo carga tu sistema los módulos (iframe, include, etc.)
-    var url = 'chc_p_cuadrilla_crear.php?solicitud=' + idsolicitud;
-    if(idcuadrilla > 0) {
-        url += '&cuadrilla=' + idcuadrilla;
-    }
-    // Si el sistema carga con parámetro tab o similar, ajustar aquí
-    window.location.href = url;
-}
-
-// ✅ Navegar a la verificación de cuadrilla
-function irAVerificarCuadrilla(idcuadrilla) {
-    window.location.href = 'chc_p_cuadrilla_verificar.php?cuadrilla=' + idcuadrilla;
-}
-</script>
+<!-- Las funciones irACuadrilla() e irAVerificarCuadrilla() están definidas
+     en chc.js (Sección 10) para que estén disponibles globalmente,
+     ya que este HTML se inyecta dinámicamente con fetch() en #chc-list. -->
