@@ -28,7 +28,7 @@ if($idSolicitud <= 0) {
 // DATOS DE LA SOLICITUD
 // ============================================================
 $sqlSolicitud = "
-    SELECT 
+    SELECT
         s.idsolicitud, s.codigocurso, s.seccion, s.nombrecurso,
         s.npacientes, s.uso_debriefing, s.idestadoagenda, s.rutpec,
         m.modalidad, m.idmodalidad,
@@ -36,15 +36,10 @@ $sqlSolicitud = "
     FROM chc_solicitud s
     LEFT JOIN chc_solicitud_modalidad sm ON s.idsolicitud = sm.idsolicitud
     LEFT JOIN chc_modalidad m ON sm.idmodalidad = m.idmodalidad
-    WHERE s.idsolicitud = ? AND s.idestadoagenda = 2
+    WHERE s.idsolicitud = $idSolicitud AND s.idestadoagenda = 2
     LIMIT 1
 ";
-$stmtSol = mysqli_prepare($conn, $sqlSolicitud);
-mysqli_stmt_bind_param($stmtSol, "i", $idSolicitud);
-mysqli_stmt_execute($stmtSol);
-$resSol = mysqli_stmt_get_result($stmtSol);
-$solicitud = mysqli_fetch_assoc($resSol);
-mysqli_stmt_close($stmtSol);
+$solicitud = mysqli_fetch_assoc(mysqli_query($conn, $sqlSolicitud));
 
 if(!$solicitud) {
     echo '<div class="alert alert-danger">La solicitud no existe o no está confirmada.</div>';
@@ -58,26 +53,22 @@ $usaDebriefing = intval($solicitud['uso_debriefing']);
 // ============================================================
 // SUBTIPOS disponibles para esta modalidad
 // ============================================================
-$sqlSubtipos = "SELECT idsubtipo, nombre, tiene_seccion3, tiene_pacientes, 
+$sqlSubtipos = "SELECT idsubtipo, nombre, tiene_seccion3, tiene_pacientes,
                        tiene_insumos, tiene_debriefing, tiene_link, tiene_ubicacion
-                FROM chc_p_cuadrilla_subtipo 
-                WHERE idmodalidad = ? AND activo = 1
+                FROM chc_p_cuadrilla_subtipo
+                WHERE idmodalidad = $idModalidad AND activo = 1
                 ORDER BY idsubtipo";
-$stmtSub = mysqli_prepare($conn, $sqlSubtipos);
-mysqli_stmt_bind_param($stmtSub, "i", $idModalidad);
-mysqli_stmt_execute($stmtSub);
-$resSub = mysqli_stmt_get_result($stmtSub);
+$resSub = mysqli_query($conn, $sqlSubtipos);
 $subtipos = array();
 while($row = mysqli_fetch_assoc($resSub)) {
     $subtipos[] = $row;
 }
-mysqli_stmt_close($stmtSub);
 
 // ============================================================
 // ACTIVIDADES asociadas a la solicitud (para tabla de fechas)
 // ============================================================
 $sqlActividades = "
-    SELECT 
+    SELECT
         p.idplanclases,
         DATE_FORMAT(p.pcl_Fecha, '%W, %d de %M de %Y') as fecha_formateada,
         DATE_FORMAT(p.pcl_Inicio, '%H:%i') as hora_inicio_bloque,
@@ -86,18 +77,14 @@ $sqlActividades = "
         p.pcl_Termino as termino_raw
     FROM chc_solicitud_actividad sa
     INNER JOIN planclases_test p ON sa.idplanclases = p.idplanclases
-    WHERE sa.idsolicitud = ?
+    WHERE sa.idsolicitud = $idSolicitud
     ORDER BY p.pcl_Fecha ASC, p.pcl_Inicio ASC
 ";
-$stmtAct = mysqli_prepare($conn, $sqlActividades);
-mysqli_stmt_bind_param($stmtAct, "i", $idSolicitud);
-mysqli_stmt_execute($stmtAct);
-$resAct = mysqli_stmt_get_result($stmtAct);
+$resAct = mysqli_query($conn, $sqlActividades);
 $actividades = array();
 while($row = mysqli_fetch_assoc($resAct)) {
     $actividades[] = $row;
 }
-mysqli_stmt_close($stmtAct);
 
 // ============================================================
 // DATOS EXISTENTES si la cuadrilla ya fue iniciada
@@ -109,39 +96,25 @@ $debriefGuardado  = null;
 
 if($idCuadrilla > 0) {
     // Cabecera
-    $stmtCuad = mysqli_prepare($conn, "SELECT * FROM chc_p_cuadrilla WHERE idcuadrilla = ? AND idsolicitud = ?");
-    mysqli_stmt_bind_param($stmtCuad, "ii", $idCuadrilla, $idSolicitud);
-    mysqli_stmt_execute($stmtCuad);
-    $cuadrilla = mysqli_fetch_assoc(mysqli_stmt_get_result($stmtCuad));
-    mysqli_stmt_close($stmtCuad);
+    $cuadrilla = mysqli_fetch_assoc(mysqli_query($conn,
+        "SELECT * FROM chc_p_cuadrilla WHERE idcuadrilla = $idCuadrilla AND idsolicitud = $idSolicitud"));
 
     if($cuadrilla) {
         // Fechas
-        $stmtFech = mysqli_prepare($conn, "SELECT * FROM chc_p_cuadrilla_fecha WHERE idcuadrilla = ?");
-        mysqli_stmt_bind_param($stmtFech, "i", $idCuadrilla);
-        mysqli_stmt_execute($stmtFech);
-        $resFech = mysqli_stmt_get_result($stmtFech);
+        $resFech = mysqli_query($conn, "SELECT * FROM chc_p_cuadrilla_fecha WHERE idcuadrilla = $idCuadrilla");
         while($row = mysqli_fetch_assoc($resFech)) {
             $fechasGuardadas[$row['idplanclases']] = $row;
         }
-        mysqli_stmt_close($stmtFech);
 
         // Capacitaciones
-        $stmtCap = mysqli_prepare($conn, "SELECT * FROM chc_p_cuadrilla_capacitacion WHERE idcuadrilla = ? ORDER BY orden ASC");
-        mysqli_stmt_bind_param($stmtCap, "i", $idCuadrilla);
-        mysqli_stmt_execute($stmtCap);
-        $resCap = mysqli_stmt_get_result($stmtCap);
+        $resCap = mysqli_query($conn, "SELECT * FROM chc_p_cuadrilla_capacitacion WHERE idcuadrilla = $idCuadrilla ORDER BY orden ASC");
         while($row = mysqli_fetch_assoc($resCap)) {
             $capsGuardadas[$row['orden']] = $row;
         }
-        mysqli_stmt_close($stmtCap);
 
         // Debriefing
-        $stmtDeb = mysqli_prepare($conn, "SELECT * FROM chc_p_cuadrilla_debriefing WHERE idcuadrilla = ?");
-        mysqli_stmt_bind_param($stmtDeb, "i", $idCuadrilla);
-        mysqli_stmt_execute($stmtDeb);
-        $debriefGuardado = mysqli_fetch_assoc(mysqli_stmt_get_result($stmtDeb));
-        mysqli_stmt_close($stmtDeb);
+        $debriefGuardado = mysqli_fetch_assoc(mysqli_query($conn,
+            "SELECT * FROM chc_p_cuadrilla_debriefing WHERE idcuadrilla = $idCuadrilla"));
     }
 }
 
@@ -839,7 +812,11 @@ function irAVerificacion() {
         Swal.fire({ icon:'warning', title:'Atención', text:'Debe guardar la cuadrilla antes de verificar.' });
         return;
     }
-    window.location.href = 'chc_p_cuadrilla_verificar.php?cuadrilla=' + idCuadrilla;
+    if(typeof irAVerificarCuadrilla === 'function') {
+        irAVerificarCuadrilla(idCuadrilla);
+    } else {
+        window.location.href = 'chc_p_cuadrilla_verificar.php?cuadrilla=' + idCuadrilla;
+    }
 }
 
 function marcarStep(paso) {

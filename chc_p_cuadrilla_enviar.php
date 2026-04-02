@@ -4,23 +4,28 @@ require_once('conexion.php');
 header('Content-Type: application/json; charset=utf-8');
 
 if(empty($_SESSION['sesion_idLogin'])) {
-    echo json_encode(['success'=>false,'message'=>'Sesión no válida']); exit;
+    echo json_encode(array('success'=>false,'message'=>'Sesión no válida')); exit;
 }
 if($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    echo json_encode(['success'=>false,'message'=>'Método no permitido']); exit;
+    echo json_encode(array('success'=>false,'message'=>'Método no permitido')); exit;
+}
+
+function post($key, $default) {
+    return isset($_POST[$key]) && $_POST[$key] !== '' ? $_POST[$key] : $default;
 }
 
 $rutPEC      = str_pad($_SESSION['sesion_idLogin'], 10, "0", STR_PAD_LEFT);
-$accion      = trim($_POST['accion']      ?? '');
-$idcuadrilla = intval($_POST['idcuadrilla'] ?? 0);
+$accion      = trim(post('accion', ''));
+$idcuadrilla = intval(post('idcuadrilla', 0));
 
 if($accion !== 'enviar_cuadrilla' || $idcuadrilla <= 0) {
-    echo json_encode(['success'=>false,'message'=>'Datos inválidos']); exit;
+    echo json_encode(array('success'=>false,'message'=>'Datos inválidos')); exit;
 }
 
 // ============================================================
 // CARGAR Y VERIFICAR CUADRILLA
 // ============================================================
+$rutPECesc = mysqli_real_escape_string($conn, $rutPEC);
 $sqlCuad = "
     SELECT cq.idcuadrilla, cq.idsolicitud, cq.estado, cq.idsubtipo,
            cq.resumen_actividad,
@@ -32,19 +37,15 @@ $sqlCuad = "
     LEFT  JOIN chc_solicitud_modalidad sm   ON sol.idsolicitud = sm.idsolicitud
     LEFT  JOIN chc_modalidad m              ON sm.idmodalidad  = m.idmodalidad
     INNER JOIN chc_p_cuadrilla_subtipo cs   ON cq.idsubtipo   = cs.idsubtipo
-    WHERE cq.idcuadrilla = ? AND cq.rut_pec = ?
+    WHERE cq.idcuadrilla = $idcuadrilla AND cq.rut_pec = '$rutPECesc'
     LIMIT 1";
-$stmt = mysqli_prepare($conn, $sqlCuad);
-mysqli_stmt_bind_param($stmt, "is", $idcuadrilla, $rutPEC);
-mysqli_stmt_execute($stmt);
-$cuadrilla = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
-mysqli_stmt_close($stmt);
+$cuadrilla = mysqli_fetch_assoc(mysqli_query($conn, $sqlCuad));
 
 if(!$cuadrilla) {
-    echo json_encode(['success'=>false,'message'=>'Cuadrilla no encontrada o sin acceso']); exit;
+    echo json_encode(array('success'=>false,'message'=>'Cuadrilla no encontrada o sin acceso')); exit;
 }
 if($cuadrilla['estado'] == 3) {
-    echo json_encode(['success'=>false,'message'=>'Esta cuadrilla ya fue enviada']); exit;
+    echo json_encode(array('success'=>false,'message'=>'Esta cuadrilla ya fue enviada')); exit;
 }
 
 // ============================================================
@@ -52,44 +53,35 @@ if($cuadrilla['estado'] == 3) {
 // ============================================================
 $sqlVer = "SELECT COUNT(*) AS total,
                   SUM(CASE WHEN hora_inicio IS NOT NULL AND hora_termino IS NOT NULL THEN 1 ELSE 0 END) AS completas
-           FROM chc_p_cuadrilla_fecha WHERE idcuadrilla = ?";
-$stmtV = mysqli_prepare($conn, $sqlVer);
-mysqli_stmt_bind_param($stmtV, "i", $idcuadrilla);
-mysqli_stmt_execute($stmtV);
-$ver = mysqli_fetch_assoc(mysqli_stmt_get_result($stmtV));
-mysqli_stmt_close($stmtV);
+           FROM chc_p_cuadrilla_fecha WHERE idcuadrilla = $idcuadrilla";
+$ver = mysqli_fetch_assoc(mysqli_query($conn, $sqlVer));
 
 if($ver['total'] == 0) {
-    echo json_encode(['success'=>false,'message'=>'No hay fechas en la sección 2. Complete la cuadrilla antes de enviar.']); exit;
+    echo json_encode(array('success'=>false,'message'=>'No hay fechas en la sección 2. Complete la cuadrilla antes de enviar.')); exit;
 }
 if($ver['completas'] < $ver['total']) {
-    echo json_encode(['success'=>false,'message'=>'Hay fechas sin hora de inicio o término. Revise la sección 2.']); exit;
+    echo json_encode(array('success'=>false,'message'=>'Hay fechas sin hora de inicio o término. Revise la sección 2.')); exit;
 }
 
 // ============================================================
 // CAMBIAR ESTADO
 // ============================================================
+$idsolicitud = intval($cuadrilla['idsolicitud']);
 mysqli_begin_transaction($conn);
 try {
     $sqlUpC = "UPDATE chc_p_cuadrilla
                SET estado = 3, fecha_envio = NOW(), fecha_modificacion = NOW()
-               WHERE idcuadrilla = ?";
-    $stmtC = mysqli_prepare($conn, $sqlUpC);
-    mysqli_stmt_bind_param($stmtC, "i", $idcuadrilla);
-    if(!mysqli_stmt_execute($stmtC)) throw new Exception('Error al actualizar cuadrilla');
-    mysqli_stmt_close($stmtC);
+               WHERE idcuadrilla = $idcuadrilla";
+    if(!mysqli_query($conn, $sqlUpC)) throw new Exception('Error al actualizar cuadrilla');
 
-    $sqlUpS = "UPDATE chc_solicitud SET idestadocuadrilla = 3 WHERE idsolicitud = ?";
-    $stmtS  = mysqli_prepare($conn, $sqlUpS);
-    mysqli_stmt_bind_param($stmtS, "i", $cuadrilla['idsolicitud']);
-    if(!mysqli_stmt_execute($stmtS)) throw new Exception('Error al actualizar solicitud');
-    mysqli_stmt_close($stmtS);
+    $sqlUpS = "UPDATE chc_solicitud SET idestadocuadrilla = 3 WHERE idsolicitud = $idsolicitud";
+    if(!mysqli_query($conn, $sqlUpS)) throw new Exception('Error al actualizar solicitud');
 
     mysqli_commit($conn);
 } catch(Exception $e) {
     mysqli_rollback($conn);
     error_log('CHC Enviar Cuadrilla: ' . $e->getMessage());
-    echo json_encode(['success'=>false,'message'=>'Error al registrar el envío: '.$e->getMessage()]); exit;
+    echo json_encode(array('success'=>false,'message'=>'Error al registrar el envío: '.$e->getMessage())); exit;
 }
 
 // ============================================================
@@ -116,12 +108,12 @@ try {
 // ============================================================
 $sqlAdmins = "SELECT correo, nombre FROM chc_usuario WHERE admin = 2 AND correo IS NOT NULL AND correo != ''";
 $resAdmins = mysqli_query($conn, $sqlAdmins);
-$admins    = [];
+$admins    = array();
 while($row = mysqli_fetch_assoc($resAdmins)) $admins[] = $row;
 
 if(empty($admins)) {
     error_log('CHC Envío: No hay admins con admin=2 configurados');
-    echo json_encode(['success'=>true,'message'=>'Cuadrilla enviada. Sin destinatarios de correo configurados.']);
+    echo json_encode(array('success'=>true,'message'=>'Cuadrilla enviada. Sin destinatarios de correo configurados.'));
     exit;
 }
 
@@ -253,11 +245,11 @@ if(file_exists($phpmailerPath)) {
     error_log('CHC Cuadrilla #'.$idcuadrilla.' — correo vía mail() nativo (sin PDF adjunto)');
 }
 
-echo json_encode([
+echo json_encode(array(
     'success'       => true,
     'message'       => 'Cuadrilla enviada exitosamente',
     'idcuadrilla'   => $idcuadrilla,
     'correo_ok'     => $correoOk,
     'pdf_generado'  => ($rutaPDF !== false)
-]);
+));
 ?>
