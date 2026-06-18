@@ -1939,6 +1939,69 @@ function subirNuevaCuadrillaCHC(idSolicitud) {
 }
 
 // ===========================================
+// SECCIÓN 13: CUADRILLA CHC
+// ===========================================
+
+/**
+ * Carga el formulario de creación/edición de cuadrilla en #chc-list
+ * @param {number} idsolicitud - ID de la solicitud
+ * @param {number} idcuadrilla - ID de cuadrilla existente (0 si es nueva)
+ */
+function irACuadrilla(idsolicitud, idcuadrilla) {
+    var chcList = document.getElementById('chc-list');
+    chcList.innerHTML = '<div class="text-center p-5"><div class="spinner-border text-primary" role="status"></div><p class="mt-2">Cargando formulario de cuadrilla...</p></div>';
+    var url = 'chc_p_cuadrilla_crear.php?solicitud=' + idsolicitud;
+    if(idcuadrilla > 0) url += '&cuadrilla=' + idcuadrilla;
+    fetch(url).then(function(r) { return r.text(); })
+    .then(function(html) {
+        chcList.innerHTML = html;
+        ejecutarScriptsHTML(chcList);
+    })
+    .catch(function(err) {
+        console.error('Error al cargar cuadrilla:', err);
+        chcList.innerHTML = '<div class="alert alert-danger m-3">Error al cargar el formulario de cuadrilla.</div>';
+    });
+}
+
+/**
+ * Carga la vista de verificación de cuadrilla en #chc-list
+ * @param {number} idcuadrilla - ID de la cuadrilla a verificar
+ */
+function irAVerificarCuadrilla(idcuadrilla) {
+    var chcList = document.getElementById('chc-list');
+    chcList.innerHTML = '<div class="text-center p-5"><div class="spinner-border text-primary" role="status"></div><p class="mt-2">Cargando verificación...</p></div>';
+    fetch('chc_p_cuadrilla_verificar.php?cuadrilla=' + idcuadrilla)
+    .then(function(r) { return r.text(); })
+    .then(function(html) {
+        chcList.innerHTML = html;
+        ejecutarScriptsHTML(chcList);
+    })
+    .catch(function(err) {
+        console.error('Error al cargar verificación:', err);
+        chcList.innerHTML = '<div class="alert alert-danger m-3">Error al cargar la verificación de cuadrilla.</div>';
+    });
+}
+
+/**
+ * Re-ejecuta los tags <script> dentro de HTML inyectado dinámicamente
+ * innerHTML no ejecuta scripts automáticamente, esta función los recrea
+ * @param {HTMLElement} contenedor - Elemento DOM que contiene los scripts a ejecutar
+ */
+function ejecutarScriptsHTML(contenedor) {
+    var scripts = contenedor.querySelectorAll('script');
+    for(var i = 0; i < scripts.length; i++) {
+        var orig = scripts[i];
+        var nuevo = document.createElement('script');
+        if(orig.src) {
+            nuevo.src = orig.src;
+        } else {
+            nuevo.innerHTML = orig.innerHTML;
+        }
+        orig.parentNode.replaceChild(nuevo, orig);
+    }
+}
+
+// ===========================================
 // SECCIÓN 12: INICIALIZACIÓN Y EVENTOS
 // ===========================================
 

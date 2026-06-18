@@ -63,6 +63,7 @@ function generarPDFCuadrilla($conn, $idCuadrilla, $guardarEnDisco = false) {
     require_once($rutaTCPDF);
 
     // --- Obtener datos de la cuadrilla ---
+    $idCuadSafe = intval($idCuadrilla);
     $sqlCuad = "
         SELECT cq.*, cs.nombre AS nombre_subtipo,
                cs.tiene_pacientes, cs.tiene_insumos, cs.tiene_debriefing,
@@ -75,48 +76,34 @@ function generarPDFCuadrilla($conn, $idCuadrilla, $guardarEnDisco = false) {
         INNER JOIN chc_solicitud sol           ON cq.idsolicitud = sol.idsolicitud
         LEFT  JOIN chc_solicitud_modalidad sm  ON sol.idsolicitud = sm.idsolicitud
         LEFT  JOIN chc_modalidad m             ON sm.idmodalidad  = m.idmodalidad
-        WHERE cq.idcuadrilla = ?
+        WHERE cq.idcuadrilla = $idCuadSafe
         LIMIT 1";
-    $stmt = mysqli_prepare($conn, $sqlCuad);
-    mysqli_stmt_bind_param($stmt, "i", $idCuadrilla);
-    mysqli_stmt_execute($stmt);
-    $cuad = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
-    mysqli_stmt_close($stmt);
+    $cuad = mysqli_fetch_assoc(mysqli_query($conn, $sqlCuad));
 
     if(!$cuad) return false;
 
     // Fechas
-    $stmtF = mysqli_prepare($conn,
-        "SELECT cf.*,
+    $sqlF = "SELECT cf.*,
                 DATE_FORMAT(p.pcl_Fecha,'%d/%m/%Y') AS fecha_display,
                 DATE_FORMAT(p.pcl_Inicio,'%H:%i')   AS bloque_inicio,
                 DATE_FORMAT(p.pcl_Termino,'%H:%i')  AS bloque_termino
          FROM chc_p_cuadrilla_fecha cf
          INNER JOIN planclases_test p ON cf.idplanclases = p.idplanclases
-         WHERE cf.idcuadrilla = ?
-         ORDER BY p.pcl_Fecha ASC, p.pcl_Inicio ASC");
-    mysqli_stmt_bind_param($stmtF, "i", $idCuadrilla);
-    mysqli_stmt_execute($stmtF);
-    $fechas = [];
-    while($r = mysqli_fetch_assoc(mysqli_stmt_get_result($stmtF))) $fechas[] = $r;
-    mysqli_stmt_close($stmtF);
+         WHERE cf.idcuadrilla = $idCuadSafe
+         ORDER BY p.pcl_Fecha ASC, p.pcl_Inicio ASC";
+    $resF = mysqli_query($conn, $sqlF);
+    $fechas = array();
+    while($r = mysqli_fetch_assoc($resF)) $fechas[] = $r;
 
     // Capacitaciones
-    $stmtC = mysqli_prepare($conn,
-        "SELECT * FROM chc_p_cuadrilla_capacitacion WHERE idcuadrilla = ? ORDER BY orden ASC");
-    mysqli_stmt_bind_param($stmtC, "i", $idCuadrilla);
-    mysqli_stmt_execute($stmtC);
-    $caps = [];
-    while($r = mysqli_fetch_assoc(mysqli_stmt_get_result($stmtC))) $caps[] = $r;
-    mysqli_stmt_close($stmtC);
+    $sqlC = "SELECT * FROM chc_p_cuadrilla_capacitacion WHERE idcuadrilla = $idCuadSafe ORDER BY orden ASC";
+    $resC = mysqli_query($conn, $sqlC);
+    $caps = array();
+    while($r = mysqli_fetch_assoc($resC)) $caps[] = $r;
 
     // Debriefing
-    $stmtD = mysqli_prepare($conn,
-        "SELECT * FROM chc_p_cuadrilla_debriefing WHERE idcuadrilla = ?");
-    mysqli_stmt_bind_param($stmtD, "i", $idCuadrilla);
-    mysqli_stmt_execute($stmtD);
-    $debrief = mysqli_fetch_assoc(mysqli_stmt_get_result($stmtD));
-    mysqli_stmt_close($stmtD);
+    $sqlD = "SELECT * FROM chc_p_cuadrilla_debriefing WHERE idcuadrilla = $idCuadSafe";
+    $debrief = mysqli_fetch_assoc(mysqli_query($conn, $sqlD));
 
     // ============================================================
     // CREAR PDF
@@ -144,7 +131,7 @@ function generarPDFCuadrilla($conn, $idCuadrilla, $guardarEnDisco = false) {
         $pdf->SetFont('helvetica', '', 9);
         $pdf->SetTextColor(100, 100, 100);
         $pdf->Cell(0, 5, $cuad['nombrecurso'] . ' | Cuadrilla #' . $idCuadrilla . ' | ' .
-            date('d/m/Y', strtotime($cuad['fecha_envio'] ?? $cuad['fecha_creacion'])), 0, 1, 'L');
+            date('d/m/Y', strtotime(isset($cuad['fecha_envio']) && $cuad['fecha_envio'] ? $cuad['fecha_envio'] : $cuad['fecha_creacion'])), 0, 1, 'L');
         $pdf->Line(15, $pdf->GetY(), 195, $pdf->GetY());
         $pdf->Ln(2);
     });
@@ -256,8 +243,8 @@ function generarPDFCuadrilla($conn, $idCuadrilla, $guardarEnDisco = false) {
         $pdf->SetTextColor($azulOscuro[0], $azulOscuro[1], $azulOscuro[2]);
         $pdf->SetFont('helvetica', 'B', 8);
 
-        $anchos = [42, 32, 22, 22];
-        $cols   = ['Fecha', 'Bloque agendado', 'H. Inicio', 'H. Término'];
+        $anchos = array(42, 32, 22, 22);
+        $cols   = array('Fecha', 'Bloque agendado', 'H. Inicio', 'H. Término');
 
         if($cuad['tiene_pacientes']) { $anchos[] = 20; $cols[] = 'Nro Pac.'; }
         if($cuad['tiene_link'])      { $anchos[] = 27; $cols[] = 'Link'; }
@@ -286,7 +273,7 @@ function generarPDFCuadrilla($conn, $idCuadrilla, $guardarEnDisco = false) {
 
             $col4 = 4;
             if($cuad['tiene_pacientes']) {
-                $pdf->Cell($anchos[$col4], 6, $f['nro_pacientes'] ?? '—', 1, 0, 'C', true);
+                $pdf->Cell($anchos[$col4], 6, isset($f['nro_pacientes']) ? $f['nro_pacientes'] : '—', 1, 0, 'C', true);
                 $col4++;
             }
             if($cuad['tiene_link']) {
@@ -319,8 +306,10 @@ function generarPDFCuadrilla($conn, $idCuadrilla, $guardarEnDisco = false) {
             $pdf->SetFillColor($azulClaro[0],$azulClaro[1],$azulClaro[2]);
             $pdf->SetTextColor($azulOscuro[0],$azulOscuro[1],$azulOscuro[2]);
             $pdf->SetFont('helvetica', 'B', 8);
-            foreach(['#','Modalidad','Fecha','Jornada'] as $k=>$h) {
-                $pdf->Cell([8,45,40,52][$k], 7, $h, 1, 0, 'C', true);
+            $capCols = array('#','Modalidad','Fecha','Jornada');
+            $capAnch = array(8,45,40,52);
+            foreach($capCols as $k=>$h) {
+                $pdf->Cell($capAnch[$k], 7, $h, 1, 0, 'C', true);
             }
             $pdf->Ln();
             $pdf->SetFont('helvetica','',8);
@@ -330,9 +319,9 @@ function generarPDFCuadrilla($conn, $idCuadrilla, $guardarEnDisco = false) {
                 $fill=$alt?array(248,249,250):array(255,255,255);
                 $pdf->SetFillColor($fill[0],$fill[1],$fill[2]);
                 $pdf->Cell(8,  6, $cap['orden'],0, 0,'C',true);
-                $pdf->Cell(45, 6, $cap['modalidad']??'—', 1, 0,'L',true);
+                $pdf->Cell(45, 6, isset($cap['modalidad']) ? $cap['modalidad'] : '—', 1, 0,'L',true);
                 $pdf->Cell(40, 6, $cap['fecha']?date('d/m/Y',strtotime($cap['fecha'])):'—', 1, 0,'C',true);
-                $pdf->Cell(52, 6, $cap['jornada']??'—', 1, 1,'L',true);
+                $pdf->Cell(52, 6, isset($cap['jornada']) ? $cap['jornada'] : '—', 1, 1,'L',true);
                 $alt=!$alt;
             }
         }
@@ -354,8 +343,8 @@ function generarPDFCuadrilla($conn, $idCuadrilla, $guardarEnDisco = false) {
         $pdf->SetTextColor(33,37,41);
         $pdf->Cell(0,6,'Implementación Física — Inducción y Retroalimentación',0,1,'L');
         $pdf->Ln(1);
-        $campo($pdf, 'Inducción (briefing)',        $debrief['implementacion_briefing']   ?? '');
-        $campo($pdf, 'Retroalimentación (debriefing)', $debrief['implementacion_debriefing'] ?? '');
+        $campo($pdf, 'Inducción (briefing)',        isset($debrief['implementacion_briefing']) ? $debrief['implementacion_briefing'] : '');
+        $campo($pdf, 'Retroalimentación (debriefing)', isset($debrief['implementacion_debriefing']) ? $debrief['implementacion_debriefing'] : '');
     }
 
     // ============================================================

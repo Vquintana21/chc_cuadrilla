@@ -4,28 +4,31 @@ require_once('conexion.php');
 header('Content-Type: application/json; charset=utf-8');
 
 if(empty($_SESSION['sesion_idLogin'])) {
-    echo json_encode(['success'=>false,'message'=>'Sesión no válida']); exit;
+    echo json_encode(array('success'=>false,'message'=>'Sesión no válida')); exit;
 }
 if($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    echo json_encode(['success'=>false,'message'=>'Método no permitido']); exit;
+    echo json_encode(array('success'=>false,'message'=>'Método no permitido')); exit;
+}
+
+function post($key, $default) {
+    return isset($_POST[$key]) && $_POST[$key] !== '' ? $_POST[$key] : $default;
 }
 
 $rutPEC = str_pad($_SESSION['sesion_idLogin'], 10, "0", STR_PAD_LEFT);
-$accion = trim($_POST['accion'] ?? '');
+$accion = trim(post('accion', ''));
 
 // ============================================================
 // Función auxiliar: verificar que la cuadrilla pertenece al PEC
 // y está en estado editable (1 o 2, no enviada)
 // ============================================================
 function verificarCuadrilaEditable($conn, $idcuadrilla, $rutPEC) {
+    $idcuadrilla = intval($idcuadrilla);
+    $rutPEC      = mysqli_real_escape_string($conn, $rutPEC);
     $sql  = "SELECT idcuadrilla, idsolicitud, idsubtipo, estado
              FROM chc_p_cuadrilla
-             WHERE idcuadrilla = ? AND rut_pec = ? LIMIT 1";
-    $stmt = mysqli_prepare($conn, $sql);
-    mysqli_stmt_bind_param($stmt, "is", $idcuadrilla, $rutPEC);
-    mysqli_stmt_execute($stmt);
-    $row = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
-    mysqli_stmt_close($stmt);
+             WHERE idcuadrilla = $idcuadrilla AND rut_pec = '$rutPEC' LIMIT 1";
+    $result = mysqli_query($conn, $sql);
+    $row = mysqli_fetch_assoc($result);
     if(!$row) return null;
     if($row['estado'] == 3) return null; // Ya enviada, no editable
     return $row;
@@ -38,17 +41,17 @@ switch($accion) {
     // Si cambia el subtipo → limpieza en cascada de datos huérfanos
     // ============================================================
     case 'editar_seccion1':
-        $idcuadrilla = intval($_POST['idcuadrilla'] ?? 0);
-        $idsubtipo   = intval($_POST['idsubtipo']   ?? 0);
-        $resumen     = trim($_POST['resumen']        ?? '');
+        $idcuadrilla = intval(post('idcuadrilla', 0));
+        $idsubtipo   = intval(post('idsubtipo', 0));
+        $resumen     = trim(post('resumen', ''));
 
         if($idcuadrilla <= 0 || $idsubtipo <= 0 || empty($resumen)) {
-            echo json_encode(['success'=>false,'message'=>'Datos incompletos']); exit;
+            echo json_encode(array('success'=>false,'message'=>'Datos incompletos')); exit;
         }
 
         $cuad = verificarCuadrilaEditable($conn, $idcuadrilla, $rutPEC);
         if(!$cuad) {
-            echo json_encode(['success'=>false,'message'=>'Cuadrilla no editable o sin acceso']); exit;
+            echo json_encode(array('success'=>false,'message'=>'Cuadrilla no editable o sin acceso')); exit;
         }
 
         $subtipAnterior = intval($cuad['idsubtipo']);
@@ -56,16 +59,13 @@ switch($accion) {
         $requiereRecarga = false;
 
         // Cargar flags del NUEVO subtipo
-        $stmtNuevo = mysqli_prepare($conn,
-            "SELECT tiene_pacientes, tiene_insumos, tiene_debriefing, tiene_link, tiene_ubicacion
-             FROM chc_p_cuadrilla_subtipo WHERE idsubtipo = ? LIMIT 1");
-        mysqli_stmt_bind_param($stmtNuevo, "i", $idsubtipo);
-        mysqli_stmt_execute($stmtNuevo);
-        $nuevoSub = mysqli_fetch_assoc(mysqli_stmt_get_result($stmtNuevo));
-        mysqli_stmt_close($stmtNuevo);
+        $idsubtipoSafe = intval($idsubtipo);
+        $sqlNuevo = "SELECT tiene_pacientes, tiene_insumos, tiene_debriefing, tiene_link, tiene_ubicacion
+                     FROM chc_p_cuadrilla_subtipo WHERE idsubtipo = $idsubtipoSafe LIMIT 1";
+        $nuevoSub = mysqli_fetch_assoc(mysqli_query($conn, $sqlNuevo));
 
         if(!$nuevoSub) {
-            echo json_encode(['success'=>false,'message'=>'Subtipo no válido']); exit;
+            echo json_encode(array('success'=>false,'message'=>'Subtipo no válido')); exit;
         }
 
         mysqli_begin_transaction($conn);
@@ -124,16 +124,16 @@ switch($accion) {
             }
 
             mysqli_commit($conn);
-            echo json_encode([
+            echo json_encode(array(
                 'success'          => true,
                 'message'          => 'Sección 1 actualizada',
                 'requiere_recarga' => $requiereRecarga
-            ]);
+            ));
 
         } catch(Exception $e) {
             mysqli_rollback($conn);
             error_log('CHC editar_seccion1: ' . $e->getMessage());
-            echo json_encode(['success'=>false,'message'=>$e->getMessage()]);
+            echo json_encode(array('success'=>false,'message'=>$e->getMessage()));
         }
         break;
 
@@ -141,21 +141,21 @@ switch($accion) {
     // EDITAR SECCIÓN 2A: Tabla de fechas (todas las filas a la vez)
     // ============================================================
     case 'editar_fechas':
-        $idcuadrilla = intval($_POST['idcuadrilla'] ?? 0);
-        $filasJson   = trim($_POST['filas']         ?? '[]');
+        $idcuadrilla = intval(post('idcuadrilla', 0));
+        $filasJson   = trim(post('filas', '[]'));
 
         if($idcuadrilla <= 0) {
-            echo json_encode(['success'=>false,'message'=>'Datos incompletos']); exit;
+            echo json_encode(array('success'=>false,'message'=>'Datos incompletos')); exit;
         }
 
         $cuad = verificarCuadrilaEditable($conn, $idcuadrilla, $rutPEC);
         if(!$cuad) {
-            echo json_encode(['success'=>false,'message'=>'Cuadrilla no editable']); exit;
+            echo json_encode(array('success'=>false,'message'=>'Cuadrilla no editable')); exit;
         }
 
         $filas = json_decode($filasJson, true);
         if(!is_array($filas) || empty($filas)) {
-            echo json_encode(['success'=>false,'message'=>'Sin filas para guardar']); exit;
+            echo json_encode(array('success'=>false,'message'=>'Sin filas para guardar')); exit;
         }
 
         mysqli_begin_transaction($conn);
@@ -187,12 +187,12 @@ switch($accion) {
                 "UPDATE chc_p_cuadrilla SET fecha_modificacion = NOW() WHERE idcuadrilla = $idcuadrilla");
 
             mysqli_commit($conn);
-            echo json_encode(['success'=>true,'message'=>'Fechas actualizadas']);
+            echo json_encode(array('success'=>true,'message'=>'Fechas actualizadas'));
 
         } catch(Exception $e) {
             mysqli_rollback($conn);
             error_log('CHC editar_fechas: ' . $e->getMessage());
-            echo json_encode(['success'=>false,'message'=>$e->getMessage()]);
+            echo json_encode(array('success'=>false,'message'=>$e->getMessage()));
         }
         break;
 
@@ -200,27 +200,27 @@ switch($accion) {
     // EDITAR SECCIÓN 2B: Capacitaciones (reemplaza todo)
     // ============================================================
     case 'editar_capacitaciones':
-        $idcuadrilla = intval($_POST['idcuadrilla'] ?? 0);
-        $filasJson   = trim($_POST['filas']         ?? '[]');
+        $idcuadrilla = intval(post('idcuadrilla', 0));
+        $filasJson   = trim(post('filas', '[]'));
 
         if($idcuadrilla <= 0) {
-            echo json_encode(['success'=>false,'message'=>'Datos incompletos']); exit;
+            echo json_encode(array('success'=>false,'message'=>'Datos incompletos')); exit;
         }
 
         $cuad = verificarCuadrilaEditable($conn, $idcuadrilla, $rutPEC);
         if(!$cuad) {
-            echo json_encode(['success'=>false,'message'=>'Cuadrilla no editable']); exit;
+            echo json_encode(array('success'=>false,'message'=>'Cuadrilla no editable')); exit;
         }
 
         $filas = json_decode($filasJson, true);
         if(!is_array($filas) || empty($filas)) {
-            echo json_encode(['success'=>false,'message'=>'Debe haber al menos una capacitación']); exit;
+            echo json_encode(array('success'=>false,'message'=>'Debe haber al menos una capacitación')); exit;
         }
 
         // Validar que la primera tenga modalidad y fecha
         $primera = $filas[0];
         if(empty($primera['modalidad']) || empty($primera['fecha'])) {
-            echo json_encode(['success'=>false,'message'=>'La primera capacitación debe tener modalidad y fecha']); exit;
+            echo json_encode(array('success'=>false,'message'=>'La primera capacitación debe tener modalidad y fecha')); exit;
         }
 
         mysqli_begin_transaction($conn);
@@ -231,9 +231,9 @@ switch($accion) {
 
             foreach($filas as $f) {
                 $ord    = intval($f['orden']);
-                $mod    = mysqli_real_escape_string($conn, $f['modalidad'] ?? '');
+                $mod    = mysqli_real_escape_string($conn, isset($f['modalidad']) ? $f['modalidad'] : '');
                 $fecha  = !empty($f['fecha']) ? "'" . mysqli_real_escape_string($conn, $f['fecha']) . "'" : "NULL";
-                $jor    = mysqli_real_escape_string($conn, $f['jornada']  ?? '');
+                $jor    = mysqli_real_escape_string($conn, isset($f['jornada']) ? $f['jornada'] : '');
 
                 $sql = "INSERT INTO chc_p_cuadrilla_capacitacion
                             (idcuadrilla, orden, modalidad, fecha, jornada)
@@ -247,12 +247,12 @@ switch($accion) {
                 "UPDATE chc_p_cuadrilla SET fecha_modificacion = NOW() WHERE idcuadrilla = $idcuadrilla");
 
             mysqli_commit($conn);
-            echo json_encode(['success'=>true,'message'=>'Capacitaciones actualizadas']);
+            echo json_encode(array('success'=>true,'message'=>'Capacitaciones actualizadas'));
 
         } catch(Exception $e) {
             mysqli_rollback($conn);
             error_log('CHC editar_capacitaciones: ' . $e->getMessage());
-            echo json_encode(['success'=>false,'message'=>$e->getMessage()]);
+            echo json_encode(array('success'=>false,'message'=>$e->getMessage()));
         }
         break;
 
@@ -260,12 +260,12 @@ switch($accion) {
     // EDITAR SECCIÓN 2C: Insumos
     // ============================================================
     case 'editar_insumos':
-        $idcuadrilla = intval($_POST['idcuadrilla'] ?? 0);
-        $insumos     = trim($_POST['insumos']       ?? '');
+        $idcuadrilla = intval(post('idcuadrilla', 0));
+        $insumos     = trim(post('insumos', ''));
 
         $cuad = verificarCuadrilaEditable($conn, $idcuadrilla, $rutPEC);
         if(!$cuad) {
-            echo json_encode(['success'=>false,'message'=>'Cuadrilla no editable']); exit;
+            echo json_encode(array('success'=>false,'message'=>'Cuadrilla no editable')); exit;
         }
 
         $insEsc = mysqli_real_escape_string($conn, $insumos);
@@ -274,9 +274,9 @@ switch($accion) {
                    WHERE idcuadrilla = $idcuadrilla";
 
         if(mysqli_query($conn, $sql)) {
-            echo json_encode(['success'=>true,'message'=>'Insumos actualizados']);
+            echo json_encode(array('success'=>true,'message'=>'Insumos actualizados'));
         } else {
-            echo json_encode(['success'=>false,'message'=>'Error: ' . mysqli_error($conn)]);
+            echo json_encode(array('success'=>false,'message'=>'Error: ' . mysqli_error($conn)));
         }
         break;
 
@@ -284,13 +284,13 @@ switch($accion) {
     // EDITAR SECCIÓN 2D: Debriefing / Briefing
     // ============================================================
     case 'editar_debriefing':
-        $idcuadrilla = intval($_POST['idcuadrilla'] ?? 0);
-        $briefing    = trim($_POST['briefing']      ?? '');
-        $debriefing  = trim($_POST['debriefing']    ?? '');
+        $idcuadrilla = intval(post('idcuadrilla', 0));
+        $briefing    = trim(post('briefing', ''));
+        $debriefing  = trim(post('debriefing', ''));
 
         $cuad = verificarCuadrilaEditable($conn, $idcuadrilla, $rutPEC);
         if(!$cuad) {
-            echo json_encode(['success'=>false,'message'=>'Cuadrilla no editable']); exit;
+            echo json_encode(array('success'=>false,'message'=>'Cuadrilla no editable')); exit;
         }
 
         $brfEsc = mysqli_real_escape_string($conn, $briefing);
@@ -306,14 +306,14 @@ switch($accion) {
         if(mysqli_query($conn, $sql)) {
             mysqli_query($conn,
                 "UPDATE chc_p_cuadrilla SET fecha_modificacion = NOW() WHERE idcuadrilla = $idcuadrilla");
-            echo json_encode(['success'=>true,'message'=>'Debriefing actualizado']);
+            echo json_encode(array('success'=>true,'message'=>'Debriefing actualizado'));
         } else {
-            echo json_encode(['success'=>false,'message'=>'Error: ' . mysqli_error($conn)]);
+            echo json_encode(array('success'=>false,'message'=>'Error: ' . mysqli_error($conn)));
         }
         break;
 
     default:
-        echo json_encode(['success'=>false,'message'=>'Acción no reconocida']);
+        echo json_encode(array('success'=>false,'message'=>'Acción no reconocida'));
         break;
 }
 ?>

@@ -14,6 +14,7 @@ if($idCuadrilla <= 0) {
 }
 
 // Cargar cuadrilla
+$rutPECesc = mysqli_real_escape_string($conn, $rutPEC);
 $sqlCuad = "
     SELECT cq.*, cs.nombre AS nombre_subtipo,
            cs.tiene_pacientes, cs.tiene_insumos, cs.tiene_debriefing,
@@ -26,13 +27,9 @@ $sqlCuad = "
     INNER JOIN chc_solicitud sol           ON cq.idsolicitud = sol.idsolicitud
     LEFT  JOIN chc_solicitud_modalidad sm  ON sol.idsolicitud = sm.idsolicitud
     LEFT  JOIN chc_modalidad m             ON sm.idmodalidad  = m.idmodalidad
-    WHERE cq.idcuadrilla = ? AND cq.rut_pec = ?
+    WHERE cq.idcuadrilla = $idCuadrilla AND cq.rut_pec = '$rutPECesc'
     LIMIT 1";
-$stmt = mysqli_prepare($conn, $sqlCuad);
-mysqli_stmt_bind_param($stmt, "is", $idCuadrilla, $rutPEC);
-mysqli_stmt_execute($stmt);
-$cuadrilla = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
-mysqli_stmt_close($stmt);
+$cuadrilla = mysqli_fetch_assoc(mysqli_query($conn, $sqlCuad));
 
 if(!$cuadrilla) {
     echo '<div class="alert alert-danger">Cuadrilla no encontrada o sin acceso.</div>'; exit;
@@ -42,52 +39,38 @@ $yaEnviada   = ($cuadrilla['estado'] == 3);
 $idModalidad = intval($cuadrilla['idmodalidad']);
 
 // Subtipos para edición
-$stmtSub = mysqli_prepare($conn,
-    "SELECT idsubtipo,nombre,tiene_pacientes,tiene_insumos,tiene_debriefing,
+$sqlSub = "SELECT idsubtipo,nombre,tiene_pacientes,tiene_insumos,tiene_debriefing,
             tiene_link,tiene_ubicacion,tiene_seccion3
-     FROM chc_p_cuadrilla_subtipo WHERE idmodalidad=? AND activo=1 ORDER BY idsubtipo");
-mysqli_stmt_bind_param($stmtSub,"i",$idModalidad);
-mysqli_stmt_execute($stmtSub);
-$resS = mysqli_stmt_get_result($stmtSub);
-$subtipos = [];
+     FROM chc_p_cuadrilla_subtipo WHERE idmodalidad=$idModalidad AND activo=1 ORDER BY idsubtipo";
+$resS = mysqli_query($conn, $sqlSub);
+$subtipos = array();
 while($r=mysqli_fetch_assoc($resS)) $subtipos[]=$r;
-mysqli_stmt_close($stmtSub);
 
 // Fechas
-$stmtF = mysqli_prepare($conn,
-    "SELECT cf.*,
+$sqlF = "SELECT cf.*,
             DATE_FORMAT(p.pcl_Fecha,'%W, %d de %M de %Y') AS fecha_display,
             DATE_FORMAT(p.pcl_Inicio,'%H:%i')  AS bloque_inicio,
             DATE_FORMAT(p.pcl_Termino,'%H:%i') AS bloque_termino,
             p.pcl_Inicio AS inicio_raw, p.pcl_Termino AS termino_raw
      FROM chc_p_cuadrilla_fecha cf
      INNER JOIN planclases_test p ON cf.idplanclases=p.idplanclases
-     WHERE cf.idcuadrilla=?
-     ORDER BY p.pcl_Fecha ASC, p.pcl_Inicio ASC");
-mysqli_stmt_bind_param($stmtF,"i",$idCuadrilla);
-mysqli_stmt_execute($stmtF);
-$fechas=[];
-while($r=mysqli_fetch_assoc(mysqli_stmt_get_result($stmtF))) $fechas[]=$r;
-mysqli_stmt_close($stmtF);
+     WHERE cf.idcuadrilla=$idCuadrilla
+     ORDER BY p.pcl_Fecha ASC, p.pcl_Inicio ASC";
+$resF = mysqli_query($conn, $sqlF);
+$fechas=array();
+while($r=mysqli_fetch_assoc($resF)) $fechas[]=$r;
 
 // Caps
-$stmtC = mysqli_prepare($conn,
-    "SELECT * FROM chc_p_cuadrilla_capacitacion WHERE idcuadrilla=? ORDER BY orden ASC");
-mysqli_stmt_bind_param($stmtC,"i",$idCuadrilla);
-mysqli_stmt_execute($stmtC);
-$caps=[];
-while($r=mysqli_fetch_assoc(mysqli_stmt_get_result($stmtC))) $caps[]=$r;
-mysqli_stmt_close($stmtC);
-$capsMap=[];
+$sqlC = "SELECT * FROM chc_p_cuadrilla_capacitacion WHERE idcuadrilla=$idCuadrilla ORDER BY orden ASC";
+$resC = mysqli_query($conn, $sqlC);
+$caps=array();
+while($r=mysqli_fetch_assoc($resC)) $caps[]=$r;
+$capsMap=array();
 foreach($caps as $c) $capsMap[$c['orden']]=$c;
 
 // Debriefing
-$stmtD = mysqli_prepare($conn,
-    "SELECT * FROM chc_p_cuadrilla_debriefing WHERE idcuadrilla=?");
-mysqli_stmt_bind_param($stmtD,"i",$idCuadrilla);
-mysqli_stmt_execute($stmtD);
-$debrief=mysqli_fetch_assoc(mysqli_stmt_get_result($stmtD));
-mysqli_stmt_close($stmtD);
+$sqlD = "SELECT * FROM chc_p_cuadrilla_debriefing WHERE idcuadrilla=$idCuadrilla";
+$debrief=mysqli_fetch_assoc(mysqli_query($conn, $sqlD));
 
 $subtipJSON = json_encode($subtipos);
 $npMax      = intval($cuadrilla['npacientes']);
@@ -231,7 +214,7 @@ body{background:#f4f6f9;}
             <div class="col-12">
                 <label class="form-label fw-bold">Resumen <span class="text-danger">*</span></label>
                 <textarea class="form-control" id="ed-resumen" rows="4"><?php
-                    echo htmlspecialchars($cuadrilla['resumen_actividad'] ?? '');
+                    echo htmlspecialchars(isset($cuadrilla['resumen_actividad']) ? $cuadrilla['resumen_actividad'] : '');
                 ?></textarea>
             </div>
         </div>
@@ -277,7 +260,7 @@ body{background:#f4f6f9;}
                     <td><?php echo $f['hora_inicio']  ? date('H:i',strtotime($f['hora_inicio']))  : '<span class="dato-vacio">—</span>'; ?></td>
                     <td><?php echo $f['hora_termino'] ? date('H:i',strtotime($f['hora_termino'])) : '<span class="dato-vacio">—</span>'; ?></td>
                     <?php if($cuadrilla['tiene_pacientes']): ?>
-                    <td><?php echo $f['nro_pacientes'] ?? '<span class="dato-vacio">—</span>'; ?></td>
+                    <td><?php echo isset($f['nro_pacientes']) ? $f['nro_pacientes'] : '<span class="dato-vacio">—</span>'; ?></td>
                     <?php endif; ?>
                     <?php if($cuadrilla['tiene_link']): ?>
                     <td><?php echo $f['link_actividad'] ? '<a href="'.htmlspecialchars($f['link_actividad']).'" target="_blank"><i class="bi bi-box-arrow-up-right"></i> Ver</a>' : '<span class="dato-vacio">—</span>'; ?></td>
@@ -339,11 +322,11 @@ body{background:#f4f6f9;}
                     </td>
                     <td class="td-ed-link <?php echo !$cuadrilla['tiene_link']?'d-none':''; ?>">
                         <input type="url" class="form-control form-control-sm inp-ed-link"
-                            value="<?php echo htmlspecialchars($f['link_actividad']??''); ?>" placeholder="https://...">
+                            value="<?php echo htmlspecialchars(isset($f['link_actividad']) ? $f['link_actividad'] : ''); ?>" placeholder="https://...">
                     </td>
                     <td class="td-ed-ubic <?php echo !$cuadrilla['tiene_ubicacion']?'d-none':''; ?>">
                         <textarea class="form-control form-control-sm inp-ed-ubic" rows="2"><?php
-                            echo htmlspecialchars($f['ubicacion']??'');
+                            echo htmlspecialchars(isset($f['ubicacion']) ? $f['ubicacion'] : '');
                         ?></textarea>
                     </td>
                 </tr>
@@ -384,9 +367,9 @@ body{background:#f4f6f9;}
                 <?php foreach($caps as $cap): ?>
                 <tr>
                     <td><?php echo $cap['orden']; ?></td>
-                    <td><?php echo htmlspecialchars($cap['modalidad']??'—'); ?></td>
+                    <td><?php echo htmlspecialchars(isset($cap['modalidad']) ? $cap['modalidad'] : '—'); ?></td>
                     <td><?php echo $cap['fecha'] ? date('d/m/Y',strtotime($cap['fecha'])) : '—'; ?></td>
-                    <td><?php echo htmlspecialchars($cap['jornada']??'—'); ?></td>
+                    <td><?php echo htmlspecialchars(isset($cap['jornada']) ? $cap['jornada'] : '—'); ?></td>
                 </tr>
                 <?php endforeach; ?>
                 </tbody>
@@ -398,7 +381,7 @@ body{background:#f4f6f9;}
         <p class="text-muted small mb-2">Mínimo 1 obligatoria — máximo 5.</p>
         <div id="ed-caps-cont">
             <?php for($i=1;$i<=5;$i++):
-                $c=$capsMap[$i]??null;
+                $c=isset($capsMap[$i])?$capsMap[$i]:null;
                 $ocu=($i>1&&!$c)?'cap-ed-oculta':'';
             ?>
             <div class="cap-ed-fila <?php echo $ocu; ?>" id="ed-cap-<?php echo $i; ?>" data-orden="<?php echo $i; ?>">
@@ -471,7 +454,7 @@ body{background:#f4f6f9;}
     <div class="vista-edicion">
         <textarea class="form-control mb-3" id="ed-insumos" rows="5"
             placeholder="Ej: 3 maniquíes de punción, 10 jeringas 5ml..."><?php
-            echo htmlspecialchars($cuadrilla['insumos']??'');
+            echo htmlspecialchars(isset($cuadrilla['insumos']) ? $cuadrilla['insumos'] : '');
         ?></textarea>
         <div class="d-flex gap-2">
             <button class="btn-guardar-sec" onclick="guardarS2c()" id="btnGS2c">
@@ -520,13 +503,13 @@ body{background:#f4f6f9;}
         <div class="mb-3">
             <label class="form-label fw-bold">Inducción (briefing)</label>
             <textarea class="form-control" id="ed-briefing" rows="3"><?php
-                echo htmlspecialchars($debrief['implementacion_briefing']??'');
+                echo htmlspecialchars(isset($debrief['implementacion_briefing']) ? $debrief['implementacion_briefing'] : '');
             ?></textarea>
         </div>
         <div class="mb-3">
             <label class="form-label fw-bold">Retroalimentación (debriefing)</label>
             <textarea class="form-control" id="ed-debriefing" rows="3"><?php
-                echo htmlspecialchars($debrief['implementacion_debriefing']??'');
+                echo htmlspecialchars(isset($debrief['implementacion_debriefing']) ? $debrief['implementacion_debriefing'] : '');
             ?></textarea>
         </div>
         <div class="d-flex gap-2">
@@ -549,10 +532,10 @@ body{background:#f4f6f9;}
         <p class="mb-0 text-muted small">Una vez enviada no podrá modificarla.</p>
     </div>
     <div class="d-flex gap-2">
-        <a href="chc_p_cuadrilla_crear.php?solicitud=<?php echo $cuadrilla['idsolicitud']; ?>&cuadrilla=<?php echo $idCuadrilla; ?>"
-           class="btn btn-outline-secondary">
+        <button class="btn btn-outline-secondary"
+                onclick="if(typeof irACuadrilla==='function'){irACuadrilla(<?php echo $cuadrilla['idsolicitud']; ?>,<?php echo $idCuadrilla; ?>)}else{window.location.href='chc_p_cuadrilla_crear.php?solicitud=<?php echo $cuadrilla['idsolicitud']; ?>&cuadrilla=<?php echo $idCuadrilla; ?>';}">
             <i class="bi bi-arrow-left me-1"></i>Volver al formulario
-        </a>
+        </button>
         <button class="btn btn-success btn-lg px-4" onclick="confirmarEnvio()">
             <i class="bi bi-send-fill me-2"></i>Enviar Cuadrilla
         </button>
